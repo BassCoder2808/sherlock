@@ -8,6 +8,7 @@ networks.
 """
 
 import csv
+import signal
 import pandas as pd
 import os
 import platform
@@ -27,7 +28,7 @@ from sites import SitesInformation
 from colorama import init
 
 module_name = "Sherlock: Find Usernames Across Social Networks"
-__version__ = "0.14.0"
+__version__ = "0.14.2"
 
 
 class SherlockFuturesSession(FuturesSession):
@@ -161,7 +162,7 @@ def MultipleUsernames(username):
 
 def sherlock(username, site_data, query_notify,
              tor=False, unique_tor=False,
-             proxy=None, timeout=None):
+             proxy=None, timeout=60):
     """Run Sherlock Analysis.
 
     Checks for existence of username on various social media sites.
@@ -177,7 +178,7 @@ def sherlock(username, site_data, query_notify,
     unique_tor             -- Boolean indicating whether to use a new tor circuit for each request.
     proxy                  -- String indicating the proxy URL
     timeout                -- Time in seconds to wait before timing out request.
-                              Default is no timeout.
+                              Default is 60 seconds.
 
     Return Value:
     Dictionary containing results from report. Key of dictionary is the name
@@ -195,7 +196,6 @@ def sherlock(username, site_data, query_notify,
 
     # Notify caller that we are starting the query.
     query_notify.start(username)
-    print()
     # Create session based on request methodology
     if tor or unique_tor:
         # Requests using Tor obfuscation
@@ -475,6 +475,14 @@ def timeout_check(value):
     return timeout
 
 
+def handler(signal_received, frame):
+    """Exit gracefully without throwing errors
+
+    Source: https://www.devdungeon.com/content/python-catch-sigint-ctrl-c
+    """
+    sys.exit(0)
+
+
 def main():
     version_string = f"%(prog)s {__version__}\n" + \
                      f"{requests.__description__}:  {requests.__version__}\n" + \
@@ -525,11 +533,8 @@ def main():
                         help="Load data from a JSON file or an online, valid, JSON file.")
     parser.add_argument("--timeout",
                         action="store", metavar="TIMEOUT",
-                        dest="timeout", type=timeout_check, default=None,
-                        help="Time (in seconds) to wait for response to requests. "
-                             "Default timeout is infinity. "
-                             "A longer timeout will be more likely to get results from slow sites. "
-                             "On the other hand, this may cause a long delay to gather all results."
+                        dest="timeout", type=timeout_check, default=60,
+                        help="Time (in seconds) to wait for response to requests (Default: 60)"
                         )
     parser.add_argument("--print-all",
                         action="store_true", dest="print_all",
@@ -546,7 +551,7 @@ def main():
     parser.add_argument("username",
                         nargs="+", metavar="USERNAMES",
                         action="store",
-                        help="One or more usernames to check with social networks."
+                        help="One or more usernames to check with social networks. Check similar usernames using {%%} (replace to '_', '-', '.')."
                         )
     parser.add_argument("--browse", "-b",
                         action="store_true", dest="browse", default=False,
@@ -556,8 +561,15 @@ def main():
                         action="store_true", default=False,
                         help="Force the use of the local data.json file.")
 
-    args = parser.parse_args()
+    parser.add_argument("--nsfw",
+                        action="store_true", default=False,
+                        help="Include checking of NSFW sites from default list.")
 
+    args = parser.parse_args()
+    
+    # If the user presses CTRL-C, exit gracefully without throwing errors
+    signal.signal(signal.SIGINT, handler)
+        
     # Check for newer version of Sherlock. If it exists, let the user know about it
     try:
         r = requests.get(
@@ -615,6 +627,9 @@ def main():
     except Exception as error:
         print(f"ERROR:  {error}")
         sys.exit(1)
+
+    if not args.nsfw:
+        sites.remove_nsfw_sites()
 
     # Create original dictionary from SitesInformation() object.
     # Eventually, the rest of the code will be updated to use the new object
